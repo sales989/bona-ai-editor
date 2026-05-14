@@ -203,7 +203,7 @@ const WorkbenchPage: React.FC = () => {
       <main className="max-w-5xl mx-auto px-4 py-6">
         <div className="space-y-6">
           {/* Tab Switcher */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 inline-flex">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 inline-flex items-center">
             <button
               onClick={() => setActiveTab('image')}
               className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${
@@ -224,6 +224,17 @@ const WorkbenchPage: React.FC = () => {
             >
               🎬 视频编辑
             </button>
+            <a
+              href="https://0519i.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-2 px-6 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 transition-all inline-flex items-center gap-1.5"
+            >
+              🌐 外贸图床
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </a>
           </div>
 
           {/* Quick Templates */}
