@@ -1,15 +1,8 @@
-// BONA AI Editor - Main Entry Point (Simplified)
+// BONA AI Editor - Main Entry Point
 // Cloudflare Workers backend with D1, KV, Telegram Bot storage
 
-import { Router, error, json } from 'itty-router';
 import { Env, JwtPayload } from './types';
 import { AuthUtils } from './utils/auth';
-
-// Import route handlers
-import { createAuthRoutes } from './routes/auth';
-import { createAdminRoutes } from './routes/admin';
-import { createTaskRoutes } from './routes/tasks';
-import { createUploadRoutes } from './routes/upload';
 
 // CORS headers helper
 const corsHeaders = {
@@ -334,12 +327,57 @@ async function handleTaskRoute(request: Request, env: Env, url: URL): Promise<Re
     .then(async () => {
       try {
         await env.DB.prepare("UPDATE tasks SET progress = 10, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(taskId).run();
-        
-        // For now, just simulate processing with a result
-        // Real AI integration will use configured API keys
-        await env.DB.prepare("UPDATE tasks SET status = 'success', progress = 100, result_file_id = 'demo_result', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(taskId).run();
+
+        // Read API keys from DB config
+        const configRows = await env.DB.prepare("SELECT provider, api_key FROM api_configs WHERE enabled = 1").all();
+        const configs: Record<string, string> = {};
+        for (const r of (configRows.results || []) as any[]) {
+          configs[r.provider] = r.api_key;
+        }
+
+        // Get source file from Telegram
+        const tgApi = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
+        const fileResp = await fetch(`${tgApi}/getFile?file_id=${source_file_ids[0]}`);
+        const fileData = await fileResp.json() as any;
+        if (!fileData.ok) {
+          throw new Error('无法获取源文件');
+        }
+        const sourceUrl = `${tgApi}/${fileData.result.file_path}`;
+
+        await env.DB.prepare("UPDATE tasks SET progress = 30, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(taskId).run();
+
+        // Try laozhang.ai API (Gemini 3 Pro Image) first
+        const laozhangKey = configs['laozhang-ai'];
+        if (laozhangKey) {
+          const lzResult = await callLaozhangAi(laozhangKey, sourceUrl, ai_prompt);
+          if (lzResult.success) {
+            const fileId = await downloadAndUploadToTg(lzResult.image_url!, env, tgApi);
+            if (fileId) {
+              await env.DB.prepare("UPDATE tasks SET status = 'success', progress = 100, result_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .bind(fileId, taskId).run();
+              return;
+            }
+          }
+        }
+
+        // Fallback: Try Atlas Cloud (if configured)
+        const atlasKey = configs['atlas'];
+        if (atlasKey) {
+          const atlasResult = await callAtlasCloud(atlasKey, sourceUrl, ai_prompt);
+          if (atlasResult.success) {
+            const fileId = await downloadAndUploadToTg(atlasResult.image_url!, env, tgApi);
+            if (fileId) {
+              await env.DB.prepare("UPDATE tasks SET status = 'success', progress = 100, result_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .bind(fileId, taskId).run();
+              return;
+            }
+          }
+        }
+
+        throw new Error('所有AI API调用失败，请检查API Key配置');
       } catch (e: any) {
-        await env.DB.prepare("UPDATE tasks SET status = 'failed', error_msg = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(e.message || '处理失败', taskId).run();
+        const errorMsg = e.message || '处理失败';
+        await env.DB.prepare("UPDATE tasks SET status = 'failed', error_msg = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(errorMsg, taskId).run();
       }
     });
 
@@ -387,4 +425,135 @@ async function handleTaskRoute(request: Request, env: Env, url: URL): Promise<Re
   }
 
   return jsonResponse({ success: false, error: 'Not found' }, 404);
+}
+
+// ====== AI API CALL FUNCTIONS ======
+
+interface AiCallResult {
+  success: boolean;
+  image_url?: string;
+  error?: string;
+}
+
+/**
+ * Download image from URL and upload to Telegram
+ * Returns Telegram file_id
+ */
+async function downloadAndUploadToTg(imageUrl: string, env: Env, tgApi: string): Promise<string | null> {
+  try {
+    let imageData: ArrayBuffer;
+
+    if (imageUrl.startsWith('data:')) {
+      // Base64 data URL
+      const base64Data = imageUrl.split(',')[1];
+      imageData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0)).buffer;
+    } else {
+      // Regular URL - download with longer timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
+      const imgResp = await fetch(imageUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!imgResp.ok) return null;
+      imageData = await imgResp.arrayBuffer();
+    }
+
+    // Upload to Telegram
+    const blob = new Blob([imageData], { type: 'image/png' });
+    const form = new FormData();
+    form.append('chat_id', env.TELEGRAM_CHAT_ID || '');
+    form.append('document', blob, 'result.png');
+    const resp = await fetch(`${tgApi}/sendDocument`, { method: 'POST', body: form });
+    const data = await resp.json() as any;
+    return data.ok && data.result?.document?.file_id ? data.result.document.file_id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Call laozhang.ai API (Gemini 3 Pro Image)
+ * https://docs.laozhang.ai/api-manual
+ */
+async function callLaozhangAi(apiKey: string, sourceUrl: string, prompt: string): Promise<AiCallResult> {
+  try {
+    const apiUrl = 'https://api.laozhang.ai/v1/images/generations';
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    const resp = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gemini-3-pro-image',
+        prompt: prompt,
+        image_url: sourceUrl,
+        n: 1,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return { success: false, error: `laozhang.ai API错误 (${resp.status}): ${errText}` };
+    }
+
+    const data = await resp.json() as any;
+
+    if (data.data?.[0]?.url) {
+      return { success: true, image_url: data.data[0].url };
+    }
+    if (data.data?.[0]?.b64_json) {
+      return { success: true, image_url: `data:image/png;base64,${data.data[0].b64_json}` };
+    }
+
+    return { success: false, error: 'laozhang.ai 返回格式异常' };
+  } catch (e: any) {
+    return { success: false, error: `laozhang.ai 调用失败: ${e.message}` };
+  }
+}
+
+/**
+ * Call Atlas Cloud API
+ */
+async function callAtlasCloud(apiKey: string, sourceUrl: string, prompt: string): Promise<AiCallResult> {
+  try {
+    const apiUrl = 'https://api.atlascloud.ai/v1/images/generations';
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    const resp = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-image-2.0',
+        prompt: prompt,
+        image: sourceUrl,
+        n: 1,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return { success: false, error: `Atlas Cloud API错误 (${resp.status}): ${errText}` };
+    }
+
+    const data = await resp.json() as any;
+    if (data.data?.[0]?.url) {
+      return { success: true, image_url: data.data[0].url };
+    }
+    if (data.data?.[0]?.b64_json) {
+      return { success: true, image_url: `data:image/png;base64,${data.data[0].b64_json}` };
+    }
+
+    return { success: false, error: 'Atlas Cloud 返回格式异常' };
+  } catch (e: any) {
+    return { success: false, error: `Atlas Cloud 调用失败: ${e.message}` };
+  }
 }

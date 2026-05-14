@@ -163,36 +163,33 @@ const WorkbenchPage: React.FC = () => {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary-600 rounded-xl flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center overflow-hidden">
+              <img src="https://0519i.com/1778744622343.jpg" alt="BONA" className="w-full h-full object-cover" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-gray-800">BONA</h1>
-              <p className="text-xs text-gray-500">AI图文编辑平台</p>
+              <h1 className="text-base sm:text-lg font-bold text-gray-800">BONA</h1>
+              <p className="text-[10px] sm:text-xs text-gray-500 hidden sm:block">AI图文编辑平台</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1 sm:gap-3 text-xs sm:text-sm flex-wrap justify-end">
             {user?.role === 'admin' && (
               <button
                 onClick={() => window.location.hash = '#/admin'}
-                className="text-sm text-gray-600 hover:text-primary-600"
+                className="px-2 sm:px-0 py-1 text-gray-600 hover:text-primary-600 whitespace-nowrap"
               >
                 管理后台
               </button>
             )}
             <button
               onClick={() => window.location.hash = '#/tasks'}
-              className="text-sm text-gray-600 hover:text-primary-600"
+              className="px-2 sm:px-0 py-1 text-gray-600 hover:text-primary-600 whitespace-nowrap"
             >
               任务中心
             </button>
-            <span className="text-sm text-gray-500">{user?.username}</span>
-            <button onClick={logout} className="text-sm text-gray-400 hover:text-red-500">
+            <span className="text-[10px] sm:text-sm text-gray-500 hidden sm:inline max-w-[80px] truncate">{user?.username}</span>
+            <button onClick={logout} className="px-2 sm:px-0 py-1 text-gray-400 hover:text-red-500 whitespace-nowrap">
               退出
             </button>
           </div>
@@ -203,10 +200,10 @@ const WorkbenchPage: React.FC = () => {
       <main className="max-w-5xl mx-auto px-4 py-6">
         <div className="space-y-6">
           {/* Tab Switcher */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 inline-flex items-center">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => setActiveTab('image')}
-              className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${
+              className={`px-4 sm:px-6 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
                 activeTab === 'image'
                   ? 'bg-primary-600 text-white shadow-sm'
                   : 'text-gray-600 hover:text-gray-800'
@@ -216,7 +213,7 @@ const WorkbenchPage: React.FC = () => {
             </button>
             <button
               onClick={() => setActiveTab('video')}
-              className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${
+              className={`px-4 sm:px-6 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
                 activeTab === 'video'
                   ? 'bg-primary-600 text-white shadow-sm'
                   : 'text-gray-600 hover:text-gray-800'
@@ -228,10 +225,10 @@ const WorkbenchPage: React.FC = () => {
               href="https://0519i.com/"
               target="_blank"
               rel="noopener noreferrer"
-              className="ml-2 px-6 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 transition-all inline-flex items-center gap-1.5"
+              className="px-4 sm:px-6 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 transition-all inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               🌐 外贸图床
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3.5 h-3.5 hidden sm:inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
               </svg>
             </a>

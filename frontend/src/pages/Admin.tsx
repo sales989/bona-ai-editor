@@ -398,6 +398,87 @@ const AdminPage: React.FC = () => {
               </div>
             </div>
 
+            {/* laozhang.ai - 一站式聚合API */}
+            <div className="card border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-white">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-pink-500 rounded-2xl flex items-center justify-center shrink-0 shadow-lg">
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-start justify-between mb-1">
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-800">🧠 laozhang.ai — 一站式聚合API</h3>
+                      <p className="text-sm text-gray-500">
+                        通过一个 API Key 调用 Gemini 3 Pro Image 等模型
+                        <a href="https://docs.laozhang.ai/api-manual" target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:text-primary-800 ml-1 underline">查看文档 →</a>
+                      </p>
+                    </div>
+                    <span className={`text-xs px-2.5 py-1 rounded-full font-medium shrink-0 ${
+                      (() => { const c = apiConfigs.find(x => x.provider === 'laozhang-ai'); return c?.api_key ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'; })()
+                    }`}>
+                      {(function() { const c = apiConfigs.find(x => x.provider === 'laozhang-ai'); return c?.api_key ? '✅ 已配置' : '⚠️ 未配置'; })()}
+                    </span>
+                  </div>
+
+                  {/* Supported models */}
+                  <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {[
+                      { name: 'Gemini 3 Pro', model: 'Image Generation', emoji: '🖼️' },
+                      { name: 'Gemini 3 Pro', model: 'Vision & OCR', emoji: '👁️' },
+                      { name: 'Gemini 3 Pro', model: 'Text Generation', emoji: '💬' },
+                    ].map(m => (
+                      <div key={m.name} className="flex items-center gap-2 bg-white/70 rounded-lg px-3 py-2 border border-gray-100">
+                        <span>{m.emoji}</span>
+                        <div>
+                          <p className="text-xs font-medium text-gray-700">{m.name}</p>
+                          <p className="text-[10px] text-gray-400">{m.model}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Config input */}
+                  <div className="mt-4">
+                    {(function() {
+                      const lzConfig = apiConfigs.find(x => x.provider === 'laozhang-ai');
+                      const isEditing = editingApi?.provider === 'laozhang-ai';
+                      return isEditing ? (
+                        <div className="flex gap-2">
+                          <input
+                            type="password"
+                            placeholder="输入 laozhang.ai API Key"
+                            value={editingApi.api_key}
+                            onChange={e => setEditingApi({ ...editingApi, api_key: e.target.value })}
+                            className="input-field flex-1"
+                          />
+                          <button onClick={handleSaveApiConfig} className="btn-primary text-sm">保存</button>
+                          <button onClick={() => setEditingApi(null)} className="btn-secondary text-sm">取消</button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setEditingApi({ provider: 'laozhang-ai', api_key: '' })}
+                          className="text-sm text-primary-600 hover:text-primary-800 font-medium"
+                        >
+                          {lzConfig?.api_key ? '🔄 重新配置 API Key' : '🔑 配置 API Key'}
+                        </button>
+                      );
+                    })()}
+                  </div>
+
+                  {(() => {
+                    const c = apiConfigs.find(x => x.provider === 'laozhang-ai');
+                    return c?.api_key ? (
+                      <p className="text-xs text-green-600 mt-2">✅ laozhang.ai 已配置，系统将自动调用 Gemini 3 Pro Image 等模型</p>
+                    ) : (
+                      <p className="text-xs text-gray-400 mt-2">💡 配置后系统通过 laozhang.ai 统一调用 Google Gemini 系列模型</p>
+                    );
+                  })()}
+                </div>
+              </div>
+            </div>
+
             {/* 独立API配置 */}
             <div className="card">
               <h3 className="font-medium mb-1">独立API配置（可选）</h3>
