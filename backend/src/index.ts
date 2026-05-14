@@ -243,6 +243,17 @@ async function handleAdminRoute(request: Request, env: Env, url: URL): Promise<R
     }});
   }
 
+  // GET /api/admin/api-key/:provider - 安全读取API Key（仅管理员）
+  const apiKeyMatch = url.pathname.match(/^\/api\/admin\/api-key\/([^\/]+)$/);
+  if (method === 'GET' && apiKeyMatch) {
+    const provider = apiKeyMatch[1];
+    const cfg = await env.DB.prepare("SELECT api_key FROM api_configs WHERE provider = ? AND enabled = 1").bind(provider).first() as any;
+    if (!cfg?.api_key) {
+      return jsonResponse({ success: false, error: '未配置API Key' }, 404);
+    }
+    return jsonResponse({ success: true, data: { api_key: cfg.api_key } });
+  }
+
   return jsonResponse({ success: false, error: 'Admin route not found' }, 404);
 }
 
@@ -322,66 +333,25 @@ async function handleTaskRoute(request: Request, env: Env, url: URL): Promise<Re
       "INSERT INTO tasks (id, user_id, task_type, source_file_ids, ai_prompt, status, progress) VALUES (?, ?, ?, ?, ?, 'pending', 0)"
     ).bind(taskId, user.userId, task_type, JSON.stringify(source_file_ids), ai_prompt).run();
 
-    // Fire and forget: process in background
-    env.DB.prepare("UPDATE tasks SET status = 'processing', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(taskId).run()
-    .then(async () => {
-      try {
-        await env.DB.prepare("UPDATE tasks SET progress = 10, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(taskId).run();
-
-        // Read API keys from DB config
-        const configRows = await env.DB.prepare("SELECT provider, api_key FROM api_configs WHERE enabled = 1").all();
-        const configs: Record<string, string> = {};
-        for (const r of (configRows.results || []) as any[]) {
-          configs[r.provider] = r.api_key;
-        }
-
-        // Get source file from Telegram
-        const tgApi = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
-        const fileResp = await fetch(`${tgApi}/getFile?file_id=${source_file_ids[0]}`);
-        const fileData = await fileResp.json() as any;
-        if (!fileData.ok) {
-          throw new Error('无法获取源文件');
-        }
-        const sourceUrl = `${tgApi}/${fileData.result.file_path}`;
-
-        await env.DB.prepare("UPDATE tasks SET progress = 30, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(taskId).run();
-
-        // Try laozhang.ai API (Gemini 3 Pro Image) first
-        const laozhangKey = configs['laozhang-ai'];
-        if (laozhangKey) {
-          const lzResult = await callLaozhangAi(laozhangKey, sourceUrl, ai_prompt);
-          if (lzResult.success) {
-            const fileId = await downloadAndUploadToTg(lzResult.image_url!, env, tgApi);
-            if (fileId) {
-              await env.DB.prepare("UPDATE tasks SET status = 'success', progress = 100, result_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-                .bind(fileId, taskId).run();
-              return;
-            }
-          }
-        }
-
-        // Fallback: Try Atlas Cloud (if configured)
-        const atlasKey = configs['atlas'];
-        if (atlasKey) {
-          const atlasResult = await callAtlasCloud(atlasKey, sourceUrl, ai_prompt);
-          if (atlasResult.success) {
-            const fileId = await downloadAndUploadToTg(atlasResult.image_url!, env, tgApi);
-            if (fileId) {
-              await env.DB.prepare("UPDATE tasks SET status = 'success', progress = 100, result_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-                .bind(fileId, taskId).run();
-              return;
-            }
-          }
-        }
-
-        throw new Error('所有AI API调用失败，请检查API Key配置');
-      } catch (e: any) {
-        const errorMsg = e.message || '处理失败';
-        await env.DB.prepare("UPDATE tasks SET status = 'failed', error_msg = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(errorMsg, taskId).run();
-      }
-    });
-
     return jsonResponse({ success: true, data: { task_id: taskId, status: 'pending' } });
+  }
+
+  // PUT /api/tasks/:id/result - 前端处理完成后回写结果
+  const resultMatch = url.pathname.match(/^\/api\/tasks\/([^\/]+)\/result$/);
+  if (method === 'PUT' && resultMatch) {
+    const taskId = resultMatch[1];
+    const task = await env.DB.prepare("SELECT * FROM tasks WHERE id = ?").bind(taskId).first() as any;
+    if (!task) return jsonResponse({ success: false, error: '任务不存在' }, 404);
+    if (task.user_id !== user.userId && user.role !== 'admin') {
+      return jsonResponse({ success: false, error: '无权限' }, 403);
+    }
+    const { result_file_id, error_msg } = await request.json();
+    if (error_msg) {
+      await env.DB.prepare("UPDATE tasks SET status = 'failed', error_msg = ?, progress = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(error_msg, taskId).run();
+    } else if (result_file_id) {
+      await env.DB.prepare("UPDATE tasks SET status = 'success', progress = 100, result_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(result_file_id, taskId).run();
+    }
+    return jsonResponse({ success: true });
   }
 
   // GET /api/tasks - List tasks
@@ -425,135 +395,4 @@ async function handleTaskRoute(request: Request, env: Env, url: URL): Promise<Re
   }
 
   return jsonResponse({ success: false, error: 'Not found' }, 404);
-}
-
-// ====== AI API CALL FUNCTIONS ======
-
-interface AiCallResult {
-  success: boolean;
-  image_url?: string;
-  error?: string;
-}
-
-/**
- * Download image from URL and upload to Telegram
- * Returns Telegram file_id
- */
-async function downloadAndUploadToTg(imageUrl: string, env: Env, tgApi: string): Promise<string | null> {
-  try {
-    let imageData: ArrayBuffer;
-
-    if (imageUrl.startsWith('data:')) {
-      // Base64 data URL
-      const base64Data = imageUrl.split(',')[1];
-      imageData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0)).buffer;
-    } else {
-      // Regular URL - download with longer timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000);
-      const imgResp = await fetch(imageUrl, { signal: controller.signal });
-      clearTimeout(timeoutId);
-      if (!imgResp.ok) return null;
-      imageData = await imgResp.arrayBuffer();
-    }
-
-    // Upload to Telegram
-    const blob = new Blob([imageData], { type: 'image/png' });
-    const form = new FormData();
-    form.append('chat_id', env.TELEGRAM_CHAT_ID || '');
-    form.append('document', blob, 'result.png');
-    const resp = await fetch(`${tgApi}/sendDocument`, { method: 'POST', body: form });
-    const data = await resp.json() as any;
-    return data.ok && data.result?.document?.file_id ? data.result.document.file_id : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Call laozhang.ai API (Gemini 3 Pro Image)
- * https://docs.laozhang.ai/api-manual
- */
-async function callLaozhangAi(apiKey: string, sourceUrl: string, prompt: string): Promise<AiCallResult> {
-  try {
-    const apiUrl = 'https://api.laozhang.ai/v1/images/generations';
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000);
-    const resp = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'gemini-3-pro-image',
-        prompt: prompt,
-        image_url: sourceUrl,
-        n: 1,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (!resp.ok) {
-      const errText = await resp.text();
-      return { success: false, error: `laozhang.ai API错误 (${resp.status}): ${errText}` };
-    }
-
-    const data = await resp.json() as any;
-
-    if (data.data?.[0]?.url) {
-      return { success: true, image_url: data.data[0].url };
-    }
-    if (data.data?.[0]?.b64_json) {
-      return { success: true, image_url: `data:image/png;base64,${data.data[0].b64_json}` };
-    }
-
-    return { success: false, error: 'laozhang.ai 返回格式异常' };
-  } catch (e: any) {
-    return { success: false, error: `laozhang.ai 调用失败: ${e.message}` };
-  }
-}
-
-/**
- * Call Atlas Cloud API
- */
-async function callAtlasCloud(apiKey: string, sourceUrl: string, prompt: string): Promise<AiCallResult> {
-  try {
-    const apiUrl = 'https://api.atlascloud.ai/v1/images/generations';
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000);
-    const resp = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-image-2.0',
-        prompt: prompt,
-        image: sourceUrl,
-        n: 1,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (!resp.ok) {
-      const errText = await resp.text();
-      return { success: false, error: `Atlas Cloud API错误 (${resp.status}): ${errText}` };
-    }
-
-    const data = await resp.json() as any;
-    if (data.data?.[0]?.url) {
-      return { success: true, image_url: data.data[0].url };
-    }
-    if (data.data?.[0]?.b64_json) {
-      return { success: true, image_url: `data:image/png;base64,${data.data[0].b64_json}` };
-    }
-
-    return { success: false, error: 'Atlas Cloud 返回格式异常' };
-  } catch (e: any) {
-    return { success: false, error: `Atlas Cloud 调用失败: ${e.message}` };
-  }
 }

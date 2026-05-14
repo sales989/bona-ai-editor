@@ -81,7 +81,7 @@ const WorkbenchPage: React.FC = () => {
     setProcessing(true);
 
     try {
-      // Step 1: Upload files
+      // Step 1: Upload files to Telegram
       setUploading(true);
       const uploadResult = await api.uploadFiles(files);
       setUploading(false);
@@ -92,22 +92,65 @@ const WorkbenchPage: React.FC = () => {
         return;
       }
 
-      // Step 2: Create task
-      const taskResult = await api.createTask(
-        activeTab,
-        uploadResult.data.file_ids,
-        prompt
-      );
+      const fileIds = uploadResult.data.file_ids;
 
+      // Step 2: Create task (pending status)
+      const taskResult = await api.createTask(activeTab, fileIds, prompt);
       if (!taskResult.success || !taskResult.data) {
         setError(taskResult.error || '创建任务失败');
         setProcessing(false);
         return;
       }
 
-      // Step 3: Poll for result
       const taskId = taskResult.data.task_id;
-      await pollTaskResult(taskId);
+
+      // Step 3: Get laozhang.ai API key from backend
+      const keyResult = await api.getApiKey('laozhang-ai');
+      if (!keyResult.success || !keyResult.data) {
+        // Try Atlas Cloud as fallback
+        const atlasResult = await api.getApiKey('atlas');
+        if (!atlasResult.success || !atlasResult.data) {
+          await api.updateTaskResult(taskId, { error_msg: '未配置API Key，请在管理后台配置 laozhang.ai 或 Atlas Cloud' });
+          setError('未配置API Key，请在管理后台配置');
+          setProcessing(false);
+          return;
+        }
+        // Use Atlas Cloud flow
+        await processWithAtlasCloud(atlasResult.data.api_key, fileIds, prompt, taskId);
+        return;
+      }
+
+      // Step 4: Get source file URL from Telegram
+      const tgInfo = await getTelegramFileUrl(fileIds[0]);
+      if (!tgInfo) {
+        setError('无法获取源文件');
+        setProcessing(false);
+        return;
+      }
+
+      // Step 5: Call laozhang.ai API (OpenAI-compatible, chat completions with image)
+      setProcessing(true);
+      const imageUrl = await callLaozhangAi(keyResult.data.api_key, tgInfo, prompt);
+
+      if (!imageUrl) {
+        setError('AI处理失败');
+        setProcessing(false);
+        return;
+      }
+
+      // Step 6: Download result and upload to Telegram
+      const resultFileId = await downloadAndUploadResult(imageUrl);
+      if (!resultFileId) {
+        setError('结果上传失败');
+        setProcessing(false);
+        return;
+      }
+
+      // Step 7: Update task status
+      await api.updateTaskResult(taskId, { result_file_id: resultFileId });
+
+      setResult({ taskId, fileId: resultFileId });
+      setProcessing(false);
 
     } catch (err) {
       setError('处理失败: ' + (err instanceof Error ? err.message : '未知错误'));
@@ -115,44 +158,155 @@ const WorkbenchPage: React.FC = () => {
     }
   };
 
-  const pollTaskResult = async (taskId: string) => {
-    let attempts = 0;
-    const maxAttempts = 60; // 2 minutes max
-
-    const poll = async (): Promise<void> => {
-      attempts++;
-      const result = await api.getTask(taskId);
-
-      if (!result.success || !result.data) {
-        setError('获取任务状态失败');
-        setProcessing(false);
-        return;
-      }
-
-      const task = result.data;
-
-      if (task.status === 'success') {
-        setResult({ taskId: task.id, fileId: task.result_file_id });
-        setProcessing(false);
-        return;
-      }
-
-      if (task.status === 'failed') {
-        setError(task.error_msg || '处理失败');
-        setProcessing(false);
-        return;
-      }
-
-      if (attempts < maxAttempts) {
-        setTimeout(poll, 2000);
-      } else {
-        setError('处理超时，请稍后查看任务中心');
-        setProcessing(false);
-      }
-    };
-
-    await poll();
+  // Get Telegram file URL for download
+  const getTelegramFileUrl = async (fileId: string): Promise<string | null> => {
+    try {
+      // The backend proxies telegram files at /api/files/:fileId
+      return `/api/files/${fileId}`;
+    } catch {
+      return null;
+    }
   };
+
+  // Call laozhang.ai API (OpenAI compatible - chat completions with vision)
+  const callLaozhangAi = async (apiKey: string, sourceUrl: string, promptText: string): Promise<string | null> => {
+    try {
+      const resp = await fetch('https://api.laozhang.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'gemini-3-pro-image',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: promptText },
+                { type: 'image_url', image_url: { url: sourceUrl } },
+              ],
+            },
+          ],
+          n: 1,
+        }),
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        console.error('laozhang.ai error:', resp.status, errText);
+        return null;
+      }
+
+      const data = await resp.json();
+      // Check for image in response
+      if (data.choices?.[0]?.message?.content) {
+        const content = data.choices[0].message.content;
+        // Try to extract image URL from content
+        const urlMatch = content.match(/https?:\/\/[^\s]+(?:png|jpg|jpeg|webp|gif)/i);
+        if (urlMatch) return urlMatch[0];
+
+        // Check if content itself is a data URL
+        if (content.startsWith('data:image')) return content;
+      }
+
+      // Try alternate response format (some models return images in different fields)
+      if (data.data?.[0]?.url) return data.data[0].url;
+      if (data.data?.[0]?.b64_json) return `data:image/png;base64,${data.data[0].b64_json}`;
+
+      return null;
+    } catch (err) {
+      console.error('laozhang.ai call failed:', err);
+      return null;
+    }
+  };
+
+  // Process with Atlas Cloud
+  const processWithAtlasCloud = async (apiKey: string, fileIds: string[], promptText: string, taskId: string) => {
+    try {
+      const sourceUrl = `/api/files/${fileIds[0]}`;
+
+      const resp = await fetch('https://api.atlascloud.ai/v1/images/generations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-image-2.0',
+          prompt: promptText,
+          image: sourceUrl,
+          n: 1,
+        }),
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        await api.updateTaskResult(taskId, { error_msg: `AI处理失败: ${resp.status}` });
+        setError('AI处理失败，请检查API Key配置');
+        setProcessing(false);
+        return;
+      }
+
+      const data = await resp.json();
+      let imageUrl: string | null = null;
+      if (data.data?.[0]?.url) imageUrl = data.data[0].url;
+      else if (data.data?.[0]?.b64_json) imageUrl = `data:image/png;base64,${data.data[0].b64_json}`;
+
+      if (!imageUrl) {
+        await api.updateTaskResult(taskId, { error_msg: 'AI返回格式异常' });
+        setError('AI返回格式异常');
+        setProcessing(false);
+        return;
+      }
+
+      const resultFileId = await downloadAndUploadResult(imageUrl);
+      if (resultFileId) {
+        await api.updateTaskResult(taskId, { result_file_id: resultFileId });
+        setResult({ taskId, fileId: resultFileId });
+      } else {
+        await api.updateTaskResult(taskId, { error_msg: '结果上传失败' });
+        setError('结果上传失败');
+      }
+      setProcessing(false);
+    } catch (err) {
+      await api.updateTaskResult(taskId, { error_msg: '处理异常' });
+      setError('处理异常: ' + (err instanceof Error ? err.message : '未知'));
+      setProcessing(false);
+    }
+  };
+
+  // Download AI result and upload to Telegram via backend
+  const downloadAndUploadResult = async (imageUrl: string): Promise<string | null> => {
+    try {
+      let blob: Blob;
+
+      if (imageUrl.startsWith('data:')) {
+        // Base64 → Blob
+        const resp2 = await fetch(imageUrl);
+        blob = await resp2.blob();
+      } else {
+        // Regular URL
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
+        const resp = await fetch(imageUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (!resp.ok) return null;
+        blob = await resp.blob();
+      }
+
+      // Upload to backend (which uploads to Telegram)
+      const file = new File([blob], 'result.png', { type: 'image/png' });
+      const result = await api.uploadFiles([file]);
+      if (result.success && result.data?.file_ids?.[0]) {
+        return result.data.file_ids[0];
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
 
   const handleQuickTemplate = (template: typeof QUICK_TEMPLATES[0]) => {
     setActiveTab(template.type as TabType);

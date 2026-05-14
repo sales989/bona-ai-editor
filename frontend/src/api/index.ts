@@ -177,6 +177,19 @@ class ApiClient {
   async getStats() {
     return this.request<{ totalUsers: number; totalTasks: number; successTasks: number; failedTasks: number }>('/admin/stats');
   }
+
+  // Get API Key (admin only)
+  async getApiKey(provider: string) {
+    return this.request<{ api_key: string }>(`/admin/api-key/${provider}`);
+  }
+
+  // Update task result (frontend writes back after AI processing)
+  async updateTaskResult(taskId: string, result: { result_file_id?: string; error_msg?: string }) {
+    return this.request(`/tasks/${taskId}/result`, {
+      method: 'PUT',
+      body: JSON.stringify(result),
+    });
+  }
 }
 
 export const api = new ApiClient();
