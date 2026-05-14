@@ -179,14 +179,14 @@ const WorkbenchPage: React.FC = () => {
           <div className="flex items-center gap-4">
             {user?.role === 'admin' && (
               <button
-                onClick={() => window.location.href = '/admin'}
+                onClick={() => window.location.hash = '#/admin'}
                 className="text-sm text-gray-600 hover:text-primary-600"
               >
                 管理后台
               </button>
             )}
             <button
-              onClick={() => window.location.href = '/tasks'}
+              onClick={() => window.location.hash = '#/tasks'}
               className="text-sm text-gray-600 hover:text-primary-600"
             >
               任务中心

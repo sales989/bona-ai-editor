@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './utils/auth';
 import LoginPage from './pages/Login';
 import WorkbenchPage from './pages/Workbench';
@@ -7,6 +7,13 @@ import AdminPage from './pages/Admin';
 
 const AppContent: React.FC = () => {
   const { user, loading } = useAuth();
+  const [route, setRoute] = useState(window.location.hash.slice(1) || '/');
+
+  useEffect(() => {
+    const onHashChange = () => setRoute(window.location.hash.slice(1) || '/');
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   if (loading) {
     return (
@@ -23,14 +30,11 @@ const AppContent: React.FC = () => {
     return <LoginPage />;
   }
 
-  // Simple hash-based routing
-  const hash = window.location.hash.slice(1) || '/';
-
-  if (hash.startsWith('/tasks')) {
+  if (route.startsWith('/tasks')) {
     return <TasksPage />;
   }
 
-  if (hash.startsWith('/admin')) {
+  if (route.startsWith('/admin')) {
     return <AdminPage />;
   }
 
