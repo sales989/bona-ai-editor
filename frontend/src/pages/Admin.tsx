@@ -316,63 +316,140 @@ const AdminPage: React.FC = () => {
 
         {/* API Configs Section */}
         {activeSection === 'api' && (
-          <div className="card">
-            <h3 className="font-medium mb-4">AI大模型API配置</h3>
-            <p className="text-sm text-gray-500 mb-4">
-              在这里填写各AI服务的API密钥，系统将根据编辑指令自动匹配最优模型。
-            </p>
-
-            <div className="space-y-4">
-              {[
-                { provider: 'picwish', name: '佐糖 PicWish', desc: '精准消除（去水印/去文字/去杂物）', link: 'https://picwish.com' },
-                { provider: 'dashscope', name: '阿里云通义万相', desc: '人脸替换/证件照换底色/精细编辑', link: 'https://dashscope.aliyun.com' },
-              ].map(cfg => {
-                const config = apiConfigs.find(c => c.provider === cfg.provider);
-                return (
-                  <div key={cfg.provider} className="border border-gray-200 rounded-xl p-4">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <h4 className="font-medium">{cfg.name}</h4>
-                        <p className="text-sm text-gray-500">{cfg.desc}</p>
-                      </div>
-                      <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-                        config?.api_key ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                      }`}>
-                        {config?.api_key ? '已配置' : '未配置'}
-                      </span>
+          <div className="space-y-6">
+            {/* Atlas Cloud - 一站式聚合API */}
+            <div className="card border-2 border-primary-200 bg-gradient-to-br from-primary-50 to-white">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-blue-500 rounded-2xl flex items-center justify-center shrink-0 shadow-lg">
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-start justify-between mb-1">
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-800">⚡ Atlas Cloud — 一站式聚合API</h3>
+                      <p className="text-sm text-gray-500">一个API Key调用所有主流AI模型，大幅降低开发和维护成本</p>
                     </div>
-                    {editingApi?.provider === cfg.provider ? (
-                      <div className="flex gap-2 mt-2">
-                        <input
-                          type="password"
-                          placeholder="输入API Key"
-                          value={editingApi.api_key}
-                          onChange={e => setEditingApi({ ...editingApi, api_key: e.target.value })}
-                          className="input-field flex-1"
-                        />
-                        <button onClick={handleSaveApiConfig} className="btn-primary text-sm">保存</button>
-                        <button onClick={() => setEditingApi(null)} className="btn-secondary text-sm">取消</button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => setEditingApi({ provider: cfg.provider, api_key: '' })}
-                        className="text-sm text-primary-600 hover:text-primary-800 mt-1"
-                      >
-                        {config?.api_key ? '重新配置' : '配置密钥'}
-                      </button>
-                    )}
-                    <p className="text-xs text-gray-400 mt-2">
-                      API文档：<a href={cfg.link} target="_blank" rel="noopener noreferrer" className="text-primary-500">{cfg.link}</a>
-                    </p>
+                    <span className={`text-xs px-2.5 py-1 rounded-full font-medium shrink-0 ${
+                      (() => { const c = apiConfigs.find(x => x.provider === 'atlas'); return c?.api_key ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'; })()
+                    }`}>
+                      {(function() { const c = apiConfigs.find(x => x.provider === 'atlas'); return c?.api_key ? '✅ 已配置' : '⚠️ 未配置'; })()}
+                    </span>
                   </div>
-                );
-              })}
+
+                  {/* Supported models */}
+                  <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {[
+                      { name: '即梦AI', model: 'Seedance 2.0', emoji: '🎬' },
+                      { name: '可灵AI', model: 'Kling 3.0', emoji: '🎨' },
+                      { name: 'Luma', model: 'Ray 3', emoji: '✨' },
+                      { name: 'ElevenLabs', model: 'v3 官方API', emoji: '🔊' },
+                      { name: 'GPT Image', model: '2.0', emoji: '🖼️' },
+                      { name: 'Google', model: 'Nano Banana 2', emoji: '🍌' },
+                    ].map(m => (
+                      <div key={m.name} className="flex items-center gap-2 bg-white/70 rounded-lg px-3 py-2 border border-gray-100">
+                        <span>{m.emoji}</span>
+                        <div>
+                          <p className="text-xs font-medium text-gray-700">{m.name}</p>
+                          <p className="text-[10px] text-gray-400">{m.model}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Config input */}
+                  <div className="mt-4">
+                    {(function() {
+                      const atlasConfig = apiConfigs.find(x => x.provider === 'atlas');
+                      const isEditing = editingApi?.provider === 'atlas';
+                      return isEditing ? (
+                        <div className="flex gap-2">
+                          <input
+                            type="password"
+                            placeholder="输入 Atlas Cloud API Key"
+                            value={editingApi.api_key}
+                            onChange={e => setEditingApi({ ...editingApi, api_key: e.target.value })}
+                            className="input-field flex-1"
+                          />
+                          <button onClick={handleSaveApiConfig} className="btn-primary text-sm">保存</button>
+                          <button onClick={() => setEditingApi(null)} className="btn-secondary text-sm">取消</button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setEditingApi({ provider: 'atlas', api_key: '' })}
+                          className="text-sm text-primary-600 hover:text-primary-800 font-medium"
+                        >
+                          {atlasConfig?.api_key ? '🔄 重新配置 API Key' : '🔑 配置 API Key'}
+                        </button>
+                      );
+                    })()}
+                  </div>
+
+                  {(() => {
+                    const c = apiConfigs.find(x => x.provider === 'atlas');
+                    return c?.api_key ? (
+                      <p className="text-xs text-green-600 mt-2">✅ Atlas Cloud 已配置，系统将自动路由各类型任务至最优AI模型</p>
+                    ) : (
+                      <p className="text-xs text-gray-400 mt-2">💡 配置后系统自动调用即梦AI(Seedance 2.0)、可灵AI(Kling 3.0)、Luma Ray 3、ElevenLabs v3、GPT Image 2.0、Google Nano Banana 2 等API</p>
+                    );
+                  })()}
+                </div>
+              </div>
             </div>
 
-            <div className="mt-4 p-4 bg-blue-50 rounded-xl">
-              <p className="text-sm text-blue-700">
-                💡 Cloudflare Workers AI（Flux模型）无需配置，已原生集成。上传API Key后将自动启用对应模型的智能调用。
+            {/* 独立API配置 */}
+            <div className="card">
+              <h3 className="font-medium mb-1">独立API配置（可选）</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                如已有特定厂商API Key，也可单独配置，系统将优先使用独立配置。
               </p>
+              <div className="space-y-4">
+                {[
+                  { provider: 'picwish', name: '佐糖 PicWish', desc: '精准消除（去水印/去文字/去杂物）', link: 'https://picwish.com', icon: '🖌️' },
+                  { provider: 'dashscope', name: '阿里云通义万相', desc: '人脸替换/证件照换底色/精细编辑', link: 'https://dashscope.aliyun.com', icon: '☁️' },
+                ].map(cfg => {
+                  const config = apiConfigs.find(c => c.provider === cfg.provider);
+                  return (
+                    <div key={cfg.provider} className="border border-gray-200 rounded-xl p-4">
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <h4 className="font-medium">{cfg.icon} {cfg.name}</h4>
+                          <p className="text-sm text-gray-500">{cfg.desc}</p>
+                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                          config?.api_key ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          {config?.api_key ? '已配置' : '可选'}
+                        </span>
+                      </div>
+                      {editingApi?.provider === cfg.provider ? (
+                        <div className="flex gap-2 mt-2">
+                          <input
+                            type="password"
+                            placeholder="输入API Key"
+                            value={editingApi.api_key}
+                            onChange={e => setEditingApi({ ...editingApi, api_key: e.target.value })}
+                            className="input-field flex-1"
+                          />
+                          <button onClick={handleSaveApiConfig} className="btn-primary text-sm">保存</button>
+                          <button onClick={() => setEditingApi(null)} className="btn-secondary text-sm">取消</button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setEditingApi({ provider: cfg.provider, api_key: '' })}
+                          className="text-sm text-primary-600 hover:text-primary-800 mt-1"
+                        >
+                          {config?.api_key ? '重新配置' : '配置密钥'}
+                        </button>
+                      )}
+                      <p className="text-xs text-gray-400 mt-2">
+                        API文档：<a href={cfg.link} target="_blank" rel="noopener noreferrer" className="text-primary-500">{cfg.link}</a>
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
