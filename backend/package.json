@@ -8,13 +8,13 @@
     "db:migrate": "wrangler d1 execute bona-ai-editor-db --file=./migrations/001_init.sql"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "itty-router": "^5.0.18",
-    "jose": "^5.9.6",
-    "bcryptjs": "^2.4.3"
+    "jose": "^5.9.6"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250320.0",
-    "wrangler": "^3.109.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "wrangler": "^4.90.1"
   }
 }

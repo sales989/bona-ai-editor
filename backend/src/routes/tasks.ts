@@ -62,11 +62,27 @@ export function createTaskRoutes(router: Router, env: Env) {
         });
       }
 
-      // Start processing in background
+      // Update status to processing
       env.DB.prepare(
         "UPDATE tasks SET status = 'processing', updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-      ).bind(task.id).run().then(() => {
-        this.processTask(env, task);
+      ).bind(task.id).run().then(async () => {
+        // Start AI processing in background
+        try {
+          await db.updateTaskStatus(task.id, 'processing', 10);
+          let result;
+          if (task_type === 'image') {
+            result = await imageService.processImage(source_file_ids, ai_prompt);
+          } else {
+            result = await videoService.processVideo(source_file_ids, ai_prompt);
+          }
+          if (result.success) {
+            await db.updateTaskStatus(task.id, 'success', 100, result.file_id, null, null);
+          } else {
+            await db.updateTaskStatus(task.id, 'failed', null, null, null, result.error || '处理失败');
+          }
+        } catch (e: any) {
+          await db.updateTaskStatus(task.id, 'failed', null, null, null, e.message || '处理异常');
+        }
       });
 
       return new Response(JSON.stringify({
